@@ -1,1 +1,113 @@
+from google.colab import files
+uploaded = files.upload()
 
+import zipfile
+import os
+
+zip_name = list(uploaded.keys())[0]
+
+extract_path = "/content/dataset"
+
+with zipfile.ZipFile(zip_name, 'r') as zip_ref:
+    zip_ref.extractall(extract_path)
+
+print("Done")
+
+os.listdir("/content/dataset")
+
+!pip install ultralytics
+
+
+from ultralytics import YOLO
+
+model = YOLO("yolov8n.pt")  # مدل سبک
+
+model.train(
+    data="/content/dataset/data.yaml",
+    epochs=20,
+    imgsz=640
+)
+
+
+from ultralytics import YOLO
+
+model = YOLO("yolov8s.pt")
+
+model.train(
+    data="/content/dataset/data.yaml",
+    epochs=50,
+    imgsz=640,
+    batch=16,
+    patience=15,
+    name="yolov8s_50_baseline"
+)
+
+
+import os, shutil, random
+from pathlib import Path
+import cv2
+import numpy as np
+
+src = Path("/content/dataset")
+dst = Path("/content/dataset_aug")
+
+if dst.exists():
+    shutil.rmtree(dst)
+
+# copy whole dataset first
+shutil.copytree(src, dst)
+
+train_img_dir = dst / "train" / "images"
+train_lbl_dir = dst / "train" / "labels"
+
+def darken_image(img):
+    alpha = random.uniform(0.45, 0.75)  # contrast/brightness reduction
+    beta = random.randint(-35, -10)
+    return cv2.convertScaleAbs(img, alpha=alpha, beta=beta)
+
+def add_rain(img):
+    rain = img.copy()
+    h, w = img.shape[:2]
+    for _ in range(random.randint(120, 220)):
+        x = random.randint(0, w-1)
+        y = random.randint(0, h-1)
+        length = random.randint(8, 18)
+        cv2.line(rain, (x, y), (min(w-1, x+2), min(h-1, y+length)), (200, 200, 200), 1)
+    return cv2.addWeighted(rain, 0.85, img, 0.15, 0)
+
+image_files = list(train_img_dir.glob("*.*"))
+
+for img_path in image_files:
+    img = cv2.imread(str(img_path))
+    if img is None:
+        continue
+
+    aug = img.copy()
+    if random.random() < 0.7:
+        aug = darken_image(aug)
+    if random.random() < 0.5:
+        aug = add_rain(aug)
+
+    new_img_path = train_img_dir / f"{img_path.stem}_darkrain{img_path.suffix}"
+    cv2.imwrite(str(new_img_path), aug)
+
+    lbl_path = train_lbl_dir / f"{img_path.stem}.txt"
+    if lbl_path.exists():
+        shutil.copy(lbl_path, train_lbl_dir / f"{img_path.stem}_darkrain.txt")
+
+print("Augmented dataset created:", dst)
+
+
+
+from ultralytics import YOLO
+
+model = YOLO("yolov8s.pt")
+
+model.train(
+    data="/content/dataset_aug/data.yaml",
+    epochs=50,
+    imgsz=640,
+    batch=16,
+    patience=15,
+    name="yolov8s_50_darkrain_aug"
+)
